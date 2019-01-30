@@ -1,0 +1,264 @@
+select 
+ sum(coalesce(lt.i,0))-sum(coalesce(tod.i,0)) importe
+,sum(can) unidades
+,count(distinct(concat(lt.fecha,lt.tienda_sap,lt.pos,lt.numtk))) numtickets
+,idperson cliente
+,des_sector
+,des_seccion
+,des_grfam
+,des_familia
+,des_subfamilia 
+,lt.idarticu
+,mst.des_articulo
+,lt.idempres
+,concat(cast (lt.year as string),lpad(cast(lt.month as string),2,'0'), lpad(cast (lt.day as string),2,'0')) yearmonthday
+,lt.tienda_atica --código ática del centro --equivale al mcsmatic4
+,rfmh.segmento --RFM Hiper
+,opa.marcab ---Marca OPA
+,hab.grupo --Marca hábitos de compra agrupada
+,hab.nombre_cluster --Marca hábitos de compra
+ from 
+(
+  select  
+   lt.fecha
+  ,lt.year
+  ,lt.month
+  ,lt.day
+  ,tarjetacliente
+  ,tienda_sap
+  ,tienda_atica
+  ,pos
+  ,numtk
+  ,idarticu --sms
+  ,ideanart --ean de la tabla de eanes
+  ,ideanart_linea_venta --ean de la linea de venta
+  ,idempres
+  ,substr(cod_completo_secc_venta,1,1) idsector 
+  ,cod_completo_secc_venta idseccic
+  ,cod_completo_grfam_venta idgrfamc
+  ,cod_completo_fami_venta idfamilc
+  ,cod_completo_subfac_venta idsubfac
+  ,sum(i) i --importe
+  ,sum(lt.can) can --unidades 
+  from
+  mm_user.t_linea_venta_pos  lt   -- para sacar la venta
+  --,mm_up.eaa_hiper_ene_2018 bor  --si queremos fitlrar boroa
+  where
+  --and bor.codigo_sap=lt.tienda_sap --para filtrar boroa
+  --idempres in ('07') --para filtrar por empresa
+  concat(cast (lt.year as string),lpad(cast(lt.month as string),2,'0'), lpad(cast (lt.day as string),2,'0'))  between '20180102' and '20180102' --filtramos por fecha
+  and cod_completo_subfac_venta not like '%499' --quitamos la menos venta
+  --and  lt.year= 2018 --filtramos la fecha de la venta siempre que sea posible, poner este filtro para que la query vaya por la partición correcta
+  --and lt.month= 1 and lt.day= 2 --filtramos la fecha de la venta siempre que sea posible, poner este filtro para que la query vaya por la partición correcta
+  --and boroa='falso' --filtramos boroa si o no
+  --and tienda_sap ='' --filtramos por tienda sap
+  --and tienda_atica ='' --filtramos por tienda atica
+  --and idarticu ='' --filtramos por sms
+  --and ideanart ='' --filtramos por ean de eanes
+  --and ideanart_linea_venta ='' --filtramos por ean de la lína de venta que no está en eanes (peso variable)
+  --and substr(cod_completo_secc_venta,1,1) ='1'
+  --and cod_completo_secc_venta ='12'
+  --and cod_completo_grfam_venta ='123'
+  --and cod_completo_fami_venta='1234'
+  --and cod_completo_subfac_venta='12345'
+  group by   
+   lt.fecha
+  ,lt.year
+  ,lt.month
+  ,lt.day
+  ,tarjetacliente
+  ,tienda_sap
+  ,tienda_atica
+  ,pos
+  ,numtk
+  ,idarticu --sms
+  ,ideanart --ean de la tabla de eanes
+  ,ideanart_linea_venta --ean de la linea de venta
+  ,idempres
+  ,substr(cod_completo_secc_venta,1,1)  
+  ,cod_completo_secc_venta 
+  ,cod_completo_grfam_venta 
+  ,cod_completo_fami_venta
+  ,cod_completo_subfac_venta 
+) lt
+inner join
+    (
+  select 
+   des_sector
+  ,des_seccion
+  ,des_grfam
+  ,des_familia
+  ,des_subfamilia
+  ,idsector_c
+  ,idempres
+  ,idseccion_c
+  ,idgrfamc_c
+  ,idfamilc_c
+  ,idsubfac_c
+  ,idarticu
+  ,ideanart
+  ,ideanart_linea_venta --ean de la tabla de eanes
+  ,des_articulo --si filtramos por aqui y queremos sacar la descripcion del articulo, hay que cruzar con la a por articulo
+  from mm_up.do_mst_articulo
+  --where    idseccion_c=''
+  --and idgrfamc_c=''
+  --and idfamilc_c=''
+  --and idsubfac_c=''
+  --and idempres='07'
+  group by  des_sector
+  ,des_seccion
+  ,des_grfam
+  ,des_familia
+  ,des_subfamilia
+  ,idsector_c
+  ,idempres
+  ,idseccion_c
+  ,idgrfamc_c
+  ,idfamilc_c
+  ,idsubfac_c
+  ,idarticu
+  ,ideanart
+  ,ideanart_linea_venta --ean de la tabla de eanes
+  ,des_articulo
+) mst --si filtramos por aqui y queremos sacar la descripcion del articulo, hay que cruzar con la a por articulo
+--asigno las descripciones                                  
+on  mst.idempres=lt.idempres
+and mst.ideanart_linea_venta=lt.ideanart_linea_venta
+and mst.idarticu=lt.idarticu --si queremos sacar la descripcion del articulo
+inner join     
+(
+  select 
+  idtarjet
+  ,a.idperson 
+  from 
+  mm_last.perstar a 
+  where a.idrepeta = '01' 
+  group by 
+  idtarjet
+  ,a.idperson
+) ps
+on lt.tarjetacliente = ps.idtarjet
+left join (select cliente,segmento from mm_raw.mk_segmentacion_rfm_nacional where year=2018 and month=7 group by cliente,segmento)  rfmn on ps.idperson = rfmn.cliente  ----rfm de nacional:filtramos el mes año en funcion de la marca que queramos coger
+left join (select cliente,segmento from mm_raw.mk_segmentacion_rfm_hiper where year=2018 and month=7 group by cliente,segmento)  rfmh on ps.idperson = rfmh.cliente  ----rfm de hiper:filtramos el mes año en funcion de la marca que queramos coger
+left join (select cliente,marcab from mm_raw.mk_segmentacion_opa where year=2018 and month=7 group by cliente,marcab) opa on ps.idperson = opa.cliente ---opa:filtramos el mes año en funcion de la marca que queramos coger
+left join (select ido_pers,grupo,nombre_cluster from mm_user.do_1conento_cliente_cluster_1217 where anio='2018' and mes='06'  group by ido_pers,grupo,nombre_cluster) hab on hab.ido_pers=ps.idperson---sacamos habitos de compra
+left outer join
+(
+  select 
+  fecha
+  ,tienda
+  ,pos
+  ,numtk
+  ,year
+  ,month
+  ,day
+  ,artcod
+  ,sum(coalesce(i,0)) i 
+  from 
+  mm_raw.t_oferta_descuento 
+  where tipo <> 'B'
+  --and  year= 2018 --filtramos la fecha de la venta siempre que sea posible, poner este filtro para que la query vaya por la partición correcta
+  --and month= 1 and day= 2 --filtramos la fecha de la venta siempre que sea posible, poner este filtro para que la query vaya por la partición correcta
+  group by 
+  fecha
+  ,tienda
+  ,pos
+  ,numtk
+  ,year
+  ,month
+  ,day
+  ,artcod
+) tod  --quitar todos los descuentos menos los de tipo B porque ya viene en el campo i de la linea de venta el importe real pagado con el descuento.si no lo excluyeramos volveriamos a restar el descuento.
+on 
+lt.fecha = tod.fecha and 
+lt.tienda_sap = tod.tienda and 
+lt.pos = tod.pos and 
+lt.numtk = tod.numtk and 
+tod.year = lt.year and 
+tod.month = lt.month and 
+tod.day = lt.day and 
+lt.ideanart_linea_venta = tod.artcod
+inner join
+(
+  select 
+  fecha
+  ,tienda
+  ,pos
+  ,numtk
+  ,year
+  ,month
+  ,day 
+  from 
+  mm_raw.t_fin_ticket 
+  where tkanusn ='0'
+  --and  year= 2018 --filtramos la fecha de la venta siempre que sea posible, poner este filtro para que la query vaya por la partición correcta
+  --and month= 1 and day= 2 --filtramos la fecha de la venta siempre que sea posible, poner este filtro para que la query vaya por la partición correcta
+  group by 
+  fecha
+  ,tienda
+  ,pos
+  ,numtk
+  ,year
+  ,month
+  ,day
+) tan   ----quitar los tickets anulados
+on 
+lt.fecha = tan.fecha and 
+lt.tienda_sap = tan.tienda and 
+lt.pos = tan.pos and 
+lt.numtk = tan.numtk and 
+tan.year = lt.year and 
+tan.month = lt.month and 
+tan.day = lt.day
+inner join
+(
+  select 
+  fecha
+  ,tienda
+  ,pos
+  ,numtk
+  ,year
+  ,month
+  ,day 
+  from 
+  mm_raw.t_inicio_ticket where vtadev = 'V'
+  --and  year= 2018 --filtramos la fecha de la venta siempre que sea posible, poner este filtro para que la query vaya por la partición correcta
+  --and month= 1 and day= 2 --filtramos la fecha de la venta siempre que sea posible, poner este filtro para que la query vaya por la partición correcta
+  group by 
+  fecha
+  ,tienda
+  ,pos
+  ,numtk
+  ,year
+  ,month
+  ,day
+) tv ---quitar las devoluciones
+on 
+lt.fecha = tv.fecha and 
+lt.tienda_sap = tv.tienda and 
+lt.pos = tv.pos and 
+lt.numtk = tv.numtk and 
+tv.year = lt.year and 
+tv.month = lt.month and 
+tv.day = lt.day 
+group by  
+idperson
+,des_sector
+,des_seccion
+,des_grfam
+,des_familia
+,des_subfamilia 
+,lt.idarticu
+,mst.des_articulo
+,lt.idempres
+,concat(cast (lt.year as string),lpad(cast(lt.month as string),2,'0'), lpad(cast (lt.day as string),2,'0')) 
+,lt.tienda_atica --código ática del centro
+,rfmh.segmento --RFM Hiper
+--,rfmn.segmento --RFM Nacional
+,opa.marcab ---Marca OPA
+,hab.grupo --Marca hábitos de compra agrupada
+,hab.nombre_cluster --Marca hábitos de compra
+
+
+QUERY_LINEA_VENTA_PRO.sql
+Displaying QUERY_LINEA_VENTA_PRO.sql.
